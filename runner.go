@@ -3,7 +3,6 @@ package main
 import (
 	"testing"
 
-	//	_ "github.com/open-cluster-management/sre-tools/pkg/framework"
 	_ "github.com/open-cluster-management/sre-tools/pkg/resources"
 
 	. "github.com/onsi/ginkgo"
