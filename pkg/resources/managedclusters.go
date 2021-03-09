@@ -27,14 +27,8 @@ var _ = Describe("To test resources per number of managed cluster", func() {
 			Ω(err).ShouldNot(HaveOccurred())
 			Ω(clusters.Items).ShouldNot(BeEmpty())
 
-			foundCluster1 := false
-			for i := range clusters.Items {
-				if clusters.Items[i].ObjectMeta.Name == "cluster1" {
-					foundCluster1 = true
-				}
-			}
+			Ω(clusters.Items[0].GetObjectMeta().GetName()).Should(Equal("cluster1"))
 
-			Ω(foundCluster1).Should(BeTrue())
 		})
 	})
 })
