@@ -16,3 +16,5 @@
 
 sre-tools
 *~
+
+backup-n-restore/*-kubeconfig
