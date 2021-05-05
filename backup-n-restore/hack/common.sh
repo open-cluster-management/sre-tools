@@ -1,5 +1,6 @@
 #/usr/bin/env bash
 
+ROOTDIR=$(git rev-parse --show-toplevel)
 
 DEFAULTS3PROVIDER=aws
 DEFAULTBUCKET=velero-backup-acm
@@ -97,15 +98,12 @@ deploy_velero() {
     local bucketname=$1
     local region=$2
     local s3credentials=$3
-    velero install \
-       --provider aws \
-       --plugins velero/velero-plugin-for-aws:v1.2.0 \
-       --bucket ${bucketname} \
-       --backup-location-config region=${region} \
-       --snapshot-location-config region=$region \
-       --secret-file ${s3credentials}
 
+    [ -f ${s3credentials} ] || { echo_red "Unable to deploy velero... Credential file ${s3credentials} does not exist"; exit 1; }
     
+    cat ${ROOTDIR}/backup-n-restore/artifacts/templates/install_velero_aws.yaml.tpl | \
+	sed "s/BUCKET/${bucketname}/; s/BACKUPSTORAGELOCATIONREGION/${region}/; s/VOLUMESNAPSHOTLOCATIONREGION/${region}/; s/S3CREDENTIALS/$(cat ${s3credentials} | base64 -w 0)/" | oc  apply -f -
+
 }
 
 
