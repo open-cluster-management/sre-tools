@@ -2,9 +2,10 @@
 
 ROOTDIR=$(git rev-parse --show-toplevel)
 
-DEFAULTS3PROVIDER=aws
-DEFAULTBUCKET=velero-backup-acm
-DEFAULTS3REGION=us-east-1
+DEFAULT_BACKUPNAME=backup-acm-sre
+DEFAULT_S3PROVIDER=aws
+DEFAULT_BUCKET=velero-backup-acm
+DEFAULT_S3REGION=us-east-1
 
 ################################################################################
 # Check static prerequisites 
@@ -106,6 +107,18 @@ deploy_velero() {
 
 }
 
+
+backup_finished() {
+    local namespace=$1
+    local backupname=$2
+    rv="1"
+    backupphase=$(oc get backup $backupname -n $namespace --ignore-not-found -o jsonpath='{.status.phase}')
+    if [ "${backupphase}" == "Completed" ] || [ "${backupphase}" == "PartiallyFailed" ] [ "${backupphase}" == "Failed" ]
+    then
+	rv="0"
+    fi
+    echo ${rv}
+}
 
 
 
