@@ -1,9 +1,56 @@
 #/usr/bin/env bash
 
-set -x
-
 ROOTDIR=$(git rev-parse --show-toplevel)
 source ${ROOTDIR}/backup-n-restore/hack/common.sh
+
+
+BUCKET=${DEFAULT_BUCKET}
+REGION=${DEFAULT_S3REGION}
+dateformat="%Y-%m-%dT%H:%M:%SZ"
+
+################################################################################
+# Help: displays usage
+################################################################################
+Help()
+{
+ # Display Help
+ echo "$0 deploys OCM hub "
+ echo
+ echo "Syntax: backup-acm [ -h|n|p ]" 
+ echo "options:"
+ echo "-b <bucket name> Specify the bucket name. Default: ${BUCKET}"
+ echo "-c <credential file path> Credential file path. No default."
+ echo "-h Print this help."
+ echo "-n <backup name> Specify the name of the backup, No default. If you don't specify a name the backup name will be acm-backup-${USER}-<date ${dateformat}>"
+ echo "-r <region name> Specify the region name ${REGION}"
+ echo
+}
+
+###############################################################
+# Main program                                                #
+###############################################################
+while getopts "b:c:hn:r:" arg; do
+ case $arg in
+     b) BUCKET=${OPTARG}
+	;;
+     c) CREDENTIALFILEPATH=${OPTARG}
+	;;
+     h) # display Usage
+	 Help
+	 exit
+	 ;;
+     n) BACKUPNAME=${OPTARG}
+        ;;
+     r) REGION=${OPTARG}
+	;;
+     *)
+         Help
+	 exit
+         ;;
+ esac
+done
+shift $((OPTIND-1))
+
 
 
 oc cluster-info
@@ -13,16 +60,8 @@ if [[ $? != "0" ]]; then
 fi
 
 
-#Mandatory namespaces in the backup
-backupnamespaces=open-cluster-management,open-cluster-management-hub,hive,openshift-operator-lifecycle-manager
-
-
-
 #Optional namespaces
 others=open-cluster-management-agent,open-cluster-management-agent-addon
-
-
-#Now Adds the labels to clusterroles, clusterrolebindings and APIservices
 
 #To create a comma separeted list of existant namespaces. To avoid PartiallyFailed backups
 IFS=',' read -ra NS <<< "$others"
@@ -33,8 +72,6 @@ do oc get ns $ns;
       backupnamespaces=${backupnamespaces},$ns;
    fi
 done
-
-
 
 #Now in all namespaces we're going to backup we exclude the helm installed resources (to avoid double instances)
 #TODO: check if label velero.io/exclude-from-backup=true already exist and eventually don't reset
@@ -51,10 +88,10 @@ do oc get ns $ns;
 done
 
 
-
-
 #Attach managed clusters... (TODO: check whether related namespace exist)
-for namespace in $(oc get managedclusters -o jsonpath='{.items[*].metadata.name}'); do backupnamespaces=${backupnamespaces},${namespace}; done
+for namespace in $(oc get managedclusters -o jsonpath='{.items[*].metadata.name}');
+do  backupnamespaces=${backupnamespaces},${namespace};
+done
 
 
 wait_until "namespace_active velero"
@@ -66,11 +103,18 @@ fi
 
 
 
+if [ -z "${BACKUPNAME}" ];
+    BACKUPNAME=acm-backup-${USER}-$(date +"${dateformat}")     
+fi
 
-velero backup create backup-sre-to-acm-dario \
+   
+velero backup create "${BACKUPNAME}" \
        --include-cluster-resources=false \
        --exclude-resources certificatesigningrequests \
        --include-namespaces ${backupnamespaces}
+
+wait_until "backup_finished velero ${BACKUPNAME}"
+
 
 #Now we should remove labels
 # TODO: dont remove labels if were already there
