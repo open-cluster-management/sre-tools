@@ -94,11 +94,10 @@ do  backupnamespaces=${backupnamespaces},${namespace};
 done
 
 
-wait_until "namespace_active velero"
-if [[ $? != 0 ]]; then
+if [[ $(namespace_active velero) != 0 ]]; then
     echo_yellow "Need to deploy velero"
-    wait_until "deployment_up_and_running velero velero"
     deploy_velero  $BUCKET $REGION $CREDENTIALFILEPATH
+    wait_until "deployment_up_and_running velero velero"    
 fi
 
 

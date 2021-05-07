@@ -108,10 +108,56 @@ deploy_velero() {
     local s3credentials=$3
 
     [ -f ${s3credentials} ] || { echo_red "Unable to deploy velero... Credential file ${s3credentials} does not exist"; exit 1; }
+
+    #create CRDs first
+    oc create -f ${ROOTDIR}/backup-n-restore/artifacts/crds/velero.yaml
+
+    local CRDS=("backups.velero.io"
+      "backupstoragelocations.velero.io"
+      "deletebackuprequests.velero.io"
+      "downloadrequests.velero.io"
+      "podvolumebackups.velero.io"
+      "podvolumerestores.velero.io"
+      "resticrepositories.velero.io"
+      "restores.velero.io"
+      "schedules.velero.io"
+      "serverstatusrequests.velero.io"
+      "volumesnapshotlocations.velero.io"
+    )
+
+    local CRDS_FOUND=0
+
+    echo "Checking for CRDs..."
+
+    while [[ $CRDS_FOUND == 0 ]];
+    do
+      for i in ${!CRDS[@]}
+      do
+        oc get crd ${CRDS[$i]} >/dev/null 2>&1
+
+        if [[ $? == 0 ]]; then
+          echo_green "Found CRD: ${CRDS[$i]}"
+          CRDS_FOUND=1
+          continue
+        else
+          echo_yellow "Did not find CRD:${CRDS[$i]}"
+          CRDS_FOUND=0
+          break
+        fi
+      done
+
+      if [[ $CRDS_FOUND == 1 ]];
+      then
+        echo_green "Found all CRDs..."
+        break
+      fi
+
+      echo "Sleeping for 1 second..."
+      sleep 1
+    done
     
     cat ${ROOTDIR}/backup-n-restore/artifacts/templates/install_velero_aws.yaml.tpl | \
-	sed "s/BUCKET/${bucketname}/; s/BACKUPSTORAGELOCATIONREGION/${region}/; s/VOLUMESNAPSHOTLOCATIONREGION/${region}/; s/S3CREDENTIALS/$(cat ${s3credentials} | base64 -w 0)/" | oc  apply -f -
-
+	    sed "s/BUCKET/${bucketname}/; s/BACKUPSTORAGELOCATIONREGION/${region}/; s/VOLUMESNAPSHOTLOCATIONREGION/${region}/; s/S3CREDENTIALS/$(cat ${s3credentials} | base64 -w 0)/" | oc  apply -f -
 }
 
 
@@ -126,6 +172,3 @@ backup_finished() {
     fi
     echo ${rv}
 }
-
-
-
