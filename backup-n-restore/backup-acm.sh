@@ -98,12 +98,12 @@ wait_until "namespace_active velero"
 if [[ $? != 0 ]]; then
     echo_yellow "Need to deploy velero"
     wait_until "deployment_up_and_running velero velero"
-    deploy_velero  $BUCKET $REGION $s3credentials
+    deploy_velero  $BUCKET $REGION $CREDENTIALFILEPATH
 fi
 
 
 
-if [ -z "${BACKUPNAME}" ];
+if [ -z "${BACKUPNAME}" ]; then
     BACKUPNAME=acm-backup-${USER}-$(date +"${dateformat}")     
 fi
 

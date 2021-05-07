@@ -29,7 +29,7 @@ fi
 #If velero was already installed, make sure it is the right version. Also validates the install above.
 veleroversion=$(velero version --client-only | awk '/Version/ {print $2}')
 if [ "$veleroversion" != "v1.6.0" ]; then
-    echo "It appears you've velero $veleroversion. The environment has been tested with velero v1.6.0-rc.2"
+    echo "It appears you've velero $veleroversion. The environment has been tested with velero v1.6.0."
     exit 1
 fi
 
@@ -52,7 +52,7 @@ echo_green() {
 wait_until() {
   local script=$1
   local wait=${2:-1}
-  local timeout=${3:-10}
+  local timeout=${3:-300}
   local i
 
   script_pretty_name=${script//_/ }
@@ -120,7 +120,7 @@ backup_finished() {
     local backupname=$2
     rv="1"
     backupphase=$(oc get backup $backupname -n $namespace --ignore-not-found -o jsonpath='{.status.phase}')
-    if [ "${backupphase}" == "Completed" ] || [ "${backupphase}" == "PartiallyFailed" ] [ "${backupphase}" == "Failed" ]
+    if [ "${backupphase}" == "Completed" ] || [ "${backupphase}" == "PartiallyFailed" ] || [ "${backupphase}" == "Failed" ]
     then
 	rv="0"
     fi
