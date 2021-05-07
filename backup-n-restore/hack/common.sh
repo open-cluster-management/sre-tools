@@ -1,6 +1,8 @@
 #/usr/bin/env bash
 
 ROOTDIR=$(git rev-parse --show-toplevel)
+VELERO_BIN_PATH=~/bin
+VELERO_INSTALL_URL=https://github.com/vmware-tanzu/velero/releases/download/v1.6.0/velero-v1.6.0-linux-amd64.tar.gz
 
 DEFAULT_BACKUPNAME=backup-acm-sre
 DEFAULT_S3PROVIDER=aws
@@ -16,12 +18,17 @@ command -v oc >/dev/null 2>&1 || { echo >&2 "can't find oc.  Aborting."; exit 1;
 #check jq
 command -v jq >/dev/null 2>&1 || { echo >&2 "can't find jq.  Aborting."; exit 1; }
 
-#check velero (version tool)
-command -v velero >/dev/null 2>&1 || { echo >&2 "can't find velero.  Aborting."; exit 1; }
+#check for velero, if it doesn't exist attempt to install
+command -v velero >/dev/null 2>&1
 
+if [ $? -ne 0 ]; then
+  echo "Velero is not installed. Attepmpting install to ${VELERO_BIN_PATH}..."
+  curl -sL $VELERO_INSTALL_URL | tar --strip-components=1 -C $VELERO_BIN_PATH -xzvf - velero-v1.6.0-linux-amd64/velero
+fi
 
+#If velero was already installed, make sure it is the right version. Also validates the install above.
 veleroversion=$(velero version --client-only | awk '/Version/ {print $2}')
-if [ "$veleroversion" != "v1.6.0-rc.2" ]; then
+if [ "$veleroversion" != "v1.6.0" ]; then
     echo "It appears you've velero $veleroversion. The environment has been tested with velero v1.6.0-rc.2"
     exit 1
 fi
