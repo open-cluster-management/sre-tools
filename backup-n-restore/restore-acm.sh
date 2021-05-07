@@ -66,30 +66,54 @@ fi
 #1) checks credentials 
 #2) check BUCKET
 #3) check region
-#4) check if mch exist
-#5) chec if no managedclusters (through labels)
 
-wait_until "namespace_active velero" #this check only velero namespace :(
-if [[ $? != 0 ]]; then
-    echo_yellow "Need to deploy velero"
-    wait_until "deployment_up_and_running velero velero"
-    deploy_velero  $BUCKET $REGION $CREDENTIALFILEPATH
+
+# Check whether mch exist
+oc get mch -A
+if [[ $? != "0" ]]; then 
+    echo_red "Install ACM before restoring managed clusters and configurations."
+    exit 1
 fi
 
-#oc get backups -n velero -o jsonpath='{.items[?(@.status.phase=="Completed")]}'
+
+# Check whether installation is empty
+for mc in $(oc get managedclusters -o jsonpath='{.items[*].metadata.name}');
+do if [ $mc == "local-cluster" ];
+   then
+       continue
+   fi
+    echo_red "ACM has already managed clusters: $mc"
+done
 
 
-completedBackups=$(oc get backups -n velero --sort-by=.status.startTimestamp  -o jsonpath='{.items[?(@.status.phase=="Completed")].metadata.name}')
-echo ${completedBackups##*' '}
+	  
+#wait_until "namespace_active velero" #this check only velero namespace :(
+if [[ $? != 0 ]]; then
+    echo_yellow "Need to deploy velero"=
+    deploy_velero  $BUCKET $REGION $CREDENTIALFILEPATH
+    wait_until "deployment_up_and_running velero velero"
+fi
 
 if [ -z "${BACKUPNAME}" ];
 then #Get most recent backup. TODO: selects only 0 errors backup
+    echo_yellow "Missing backup name... Selecting one"
     completedBackups=$(oc get backups -n velero --sort-by=.status.startTimestamp  -o jsonpath='{.items[?(@.status.phase=="Completed")].metadata.name}')
     BACKUPNAME=${completedBackups##*' '}
 fi
 
+
+if  [ -z "${BACKUPNAME}" ]
+then
+    echo_red "Unable to select backup..."
+    exit 1
+else
+    echo_green "Backup selected ${BACKUPNAME}"
+fi
+
 velero restore create --from-backup ${BACKUPNAME}
 #TODO wait unti restore complete
+
+
 
 newhubkubeconfig=$(mktemp)
 oc config view --flatten > ${newhubkubeconfig}
@@ -98,17 +122,25 @@ do managed_kubeconfig_secret=$(oc get secret -o name -n $n | grep admin-kubeconf
    if [ -z "${managed_kubeconfig_secret}" ]; then #this will skip local-cluster as well
       continue
    fi
-   oc get $managed_kubeconfig_secret -n $n  -o jsonpath={.data.kubeconfig} | base64 -d > $n-kubeconfig
-  
-   oc --kubeconfig=$n-kubeconfig delete deployment klusterlet  -n open-cluster-management-agent -wait=true
-      
-   oc --kubeconfig=$n-kubeconfig delete secret hub-kubeconfig-secret -n open-cluster-management-agent
-   # TODO: remove sleep 
-   sleep 10
+
+   managedclusterkubeconfig=$(mktemp)
+   #Get the secret for the managed cluster $n
+   oc get $managed_kubeconfig_secret -n $n  -o jsonpath={.data.kubeconfig} | base64 -d > $managedclusterkubeconfig
+
+   # Remove deployment
+   oc --kubeconfig=$managedclusterkubeconfig delete deployment klusterlet  -n open-cluster-management-agent --wait=true      
+   echo_green "Klusterlet deleted for cluster $n"
    
-   #Now import the cluster
-   oc get secret  $n-import -n $n -o jsonpath={.data.import\\.yaml} | base64 -d | oc --kubeconfig=$n-kubeconfig apply -f -
+   #Now import the cluster:
+   # 1 get the original import secret
+   oc get secret  $n-import -n $n -o jsonpath={.data.import\\.yaml} | base64 -d  > $n-import-old.yaml
+   # 2 patch it with the new kubeconfig
+   cat $n-import-old.yaml | \
+       sed "s/  kubeconfig: .*$/  kubeconfig: $(cat ${newhubkubeconfig} | base64 -w 0)/" |  \
+       oc --kubeconfig=$managedclusterkubeconfig apply -f -
    
+   echo_green "Cluster $n imported"
+   rm -rf $managedclusterkubeconfig
 done
 
-
+rm -rf ${newhubkubeconfig}

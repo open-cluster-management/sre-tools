@@ -158,6 +158,9 @@ deploy_velero() {
     
     cat ${ROOTDIR}/backup-n-restore/artifacts/templates/install_velero_aws.yaml.tpl | \
 	    sed "s/BUCKET/${bucketname}/; s/BACKUPSTORAGELOCATIONREGION/${region}/; s/VOLUMESNAPSHOTLOCATIONREGION/${region}/; s/S3CREDENTIALS/$(cat ${s3credentials} | base64 -w 0)/" | oc  apply -f -
+	sed "s/VOLUMESNAPSHOTLOCATIONREGION/${region}/" | \
+	sed "s/S3CREDENTIALS/$(cat ${s3credentials} | base64 -w 0)/" | \
+	oc  apply -f -
 }
 
 
