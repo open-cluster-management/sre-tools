@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+set -x
 
 #https://github.com/vmware-tanzu/velero-plugin-for-aws
 #https://github.com/vmware-tanzu/velero-plugin-for-aws#option-1-set-permissions-with-an-iam-user
@@ -62,10 +63,14 @@ if [[ $? != "0" ]]; then
 fi
 
 
-#TODO
-#1) checks credentials 
-#2) check BUCKET
-#3) check region
+[  -z $CREDENTIALFILEPATH  ] && { echo_red "No credential file give. Cannot continue."; echo; Help; exit 1; }
+[ ! -f $CREDENTIALFILEPATH ] && { echo_red "Cannot find file $CREDENTIALFILEPATH, Cannot continue"; echo; Help; exit 1; }
+
+[  -z $BUCKET  ] && { echo_red "No velero bucket found. Cannot continue."; echo; Help; exit 1; }
+echo_green "Velero bucket $BUCKET"
+
+[  -z $REGION  ] && { echo_red "No velero region found. Cannot continue."; echo; Help; exit 1; }
+echo_green "Velero region $REGION"
 
 
 # Check whether mch exist
@@ -82,38 +87,43 @@ do if [ $mc == "local-cluster" ];
    then
        continue
    fi
-    echo_red "ACM has already managed clusters: $mc"
+   echo_red "ACM has already managed clusters: $mc"
+   exit
 done
 
 
-	  
-#wait_until "namespace_active velero" #this check only velero namespace :(
+wait_until "namespace_active velero" 1 5
 if [[ $? != 0 ]]; then
     echo_yellow "Need to deploy velero"=
     deploy_velero  $BUCKET $REGION $CREDENTIALFILEPATH
-    wait_until "deployment_up_and_running velero velero"
+    sleep 10
 fi
 
+
+# Here velero should be up and running
+wait_until "deployment_up_and_running velero velero" 1 30
+
 if [ -z "${BACKUPNAME}" ];
-then #Get most recent backup. TODO: selects only 0 errors backup
-    echo_yellow "Missing backup name... Selecting one"
+then #Get most recent backup.
+    echo_yellow "Missing backup name... Selecting the most recent without errors"
     completedBackups=$(oc get backups -n velero --sort-by=.status.startTimestamp  -o jsonpath='{.items[?(@.status.phase=="Completed")].metadata.name}')
     BACKUPNAME=${completedBackups##*' '}
 fi
 
-
-if  [ -z "${BACKUPNAME}" ]
-then
-    echo_red "Unable to select backup..."
-    exit 1
-else
-    echo_green "Backup selected ${BACKUPNAME}"
-fi
-
-velero restore create --from-backup ${BACKUPNAME}
-#TODO wait unti restore complete
+[  -z $BACKUPNAME  ] && { echo_red "No backup found. Cannot continue."; echo; Help; exit 1; }
+echo_green "Backup selected ${BACKUPNAME}"
 
 
+
+RESTORENAME=acm-restore-$(date +"%Y-%m-%d%H-%M-%S")
+cat ${ROOTDIR}/backup-n-restore/artifacts/templates/restore.yaml.tpl | \
+    sed "s/VELERO_RESTORE_NAME/${RESTORENAME}/" | \
+    sed "s/VELERO_NAMESPACE/velero/" | \
+    sed "s/VELERO_BACKUP_NAME/${BACKUPNAME}/" | \
+    oc apply -f - > /dev/null 2>&1
+
+echo_green "Restore Created: $RESTORENAME" 
+wait_until "restore_finished velero ${RESTORENAME}" 5 300
 
 newhubkubeconfig=$(mktemp)
 oc config view --flatten > ${newhubkubeconfig}
@@ -124,23 +134,16 @@ do managed_kubeconfig_secret=$(oc get secret -o name -n $n | grep admin-kubeconf
    fi
 
    managedclusterkubeconfig=$(mktemp)
-   #Get the secret for the managed cluster $n
    oc get $managed_kubeconfig_secret -n $n  -o jsonpath={.data.kubeconfig} | base64 -d > $managedclusterkubeconfig
 
-   # Remove deployment
-   oc --kubeconfig=$managedclusterkubeconfig delete deployment klusterlet  -n open-cluster-management-agent --wait=true      
-   echo_green "Klusterlet deleted for cluster $n"
-   
-   #Now import the cluster:
-   # 1 get the original import secret
-   oc get secret  $n-import -n $n -o jsonpath={.data.import\\.yaml} | base64 -d  > $n-import-old.yaml
-   # 2 patch it with the new kubeconfig
-   cat $n-import-old.yaml | \
-       sed "s/  kubeconfig: .*$/  kubeconfig: $(cat ${newhubkubeconfig} | base64 -w 0)/" |  \
-       oc --kubeconfig=$managedclusterkubeconfig apply -f -
-   
-   echo_green "Cluster $n imported"
-   rm -rf $managedclusterkubeconfig
+   #Deleting the bootstrap-hu-kubeconfig
+   oc --kubeconfig=$managedclusterkubeconfig delete secret bootstrap-hub-kubeconfig -n open-cluster-management-agent --wait=true
+
+   #Recreating boostrap-hub-kubeconfig
+   oc --kubeconfig=$managedclusterkubeconfig create secret generic bootstrap-hub-kubeconfig --from-file=kubeconfig="${newhubkubeconfig}" -n open-cluster-management-agent
+
 done
 
 rm -rf ${newhubkubeconfig}
+
+
