@@ -62,6 +62,7 @@ fi
 
 #Optional namespaces
 others=open-cluster-management-agent,open-cluster-management-agent-addon
+backupnamespaces=""
 
 #To create a comma separeted list of existant namespaces. To avoid PartiallyFailed backups
 IFS=',' read -ra NS <<< "$others"
@@ -69,7 +70,12 @@ for ns in ${NS[@]};
 do oc get ns $ns;
    if [ $? -eq 0 ];
    then
-      backupnamespaces=${backupnamespaces},$ns;
+      if [[ $backupnamespaces == "" ]];
+      then
+        backupnamespaces=$ns
+      else
+        backupnamespaces=${backupnamespaces},$ns;
+      fi
    fi
 done
 
