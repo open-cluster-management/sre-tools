@@ -187,3 +187,196 @@ restore_finished() {
     fi
     echo ${rv}
 }
+
+
+# register_managed_clusters modifies the boostrap kubeconfig in every managed cluster. It also creates 
+# creates clusterrole and clusterrolebdings for the <managed cluster name> in th new hub
+#
+register_managed_clusters() {
+    server=$(oc config view -o jsonpath='{.clusters[0].cluster.server}')
+    echo_green "Server -> $server"
+
+    for managedclustername in $(oc get ns -lcluster.open-cluster-management.io/managedCluster -o jsonpath='{.items[*].metadata.name}');
+    do managed_kubeconfig_secret=$(oc get secret -o name -n $managedclustername | grep admin-kubeconfig);
+       if [ -z "${managed_kubeconfig_secret}" ]; then #this will skip local-cluster as well
+	   echo "skipping $managedclustername"
+	   continue
+       fi
+
+       managed_kubeconfig_secret=$(basename $managed_kubeconfig_secret)
+       managedclusterkubeconfig=$(mktemp)
+       oc get secret $managed_kubeconfig_secret -n $managedclustername -o jsonpath={.data.kubeconfig} | base64 -d > $managedclusterkubeconfig
+       
+       server=$(oc config view -o jsonpath='{.clusters[0].cluster.server}')
+       secretname=$(oc get secret -o name -n $managedclustername | grep ${managedclustername}-bootstrap-sa-token)
+       ca=$(kubectl get ${secretname} -n ${managedclustername} -o jsonpath='{.data.ca\.crt}')
+       token=$(kubectl get ${secretname} -n ${managedclustername} -o jsonpath='{.data.token}' | base64 --decode)
+   
+       newbootstraphubkubeconfig=$(mktemp)
+       cat << EOF > ${newbootstraphubkubeconfig}
+apiVersion: v1
+kind: Config
+clusters:
+- name: default-cluster
+  cluster:
+    certificate-authority-data: ${ca}
+    server: ${server}
+contexts:
+- name: default-context
+  context:
+    cluster: default-cluster
+    namespace: default
+    user: default-auth
+current-context: default-context
+users:
+- name: default-auth
+  user:
+    token: ${token}
+EOF
+       
+       echo_yellow "Created $newbootstraphubkubeconfig"
+       
+       oc --kubeconfig=$managedclusterkubeconfig delete secret  bootstrap-hub-kubeconfig -n open-cluster-management-agent
+       
+       oc --kubeconfig=$managedclusterkubeconfig create secret generic bootstrap-hub-kubeconfig --from-file=kubeconfig="${newbootstraphubkubeconfig}" -n open-cluster-management-agent
+
+       rm -rf $managedclusterkubeconfig
+       if [ $? -eq 0 ]
+       then
+           echo_green "tmp kubeconfig $managedclusterkubeconfig deleted"
+       fi
+       
+       rm -rf $newbootstraphubkubeconfig
+       if [ $? -eq 0 ]
+       then
+	   echo_green "tmp kubeconfig $newbootstraphubkubeconfig deleted"
+       fi
+
+       cat << EOF | oc  apply -f -
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: system:open-cluster-management:managedcluster:bootstrap:${managedclustername}
+rules:
+- apiGroups:
+  - certificates.k8s.io
+  resources:
+  - certificatesigningrequests
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cluster.open-cluster-management.io
+  resources:
+  - managedclusters
+  verbs:
+  - get
+  - create
+EOF
+
+       cat << EOF | oc  apply -f -
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  managedFields:
+  name: system:open-cluster-management:managedcluster:bootstrap:${managedclustername}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:open-cluster-management:managedcluster:bootstrap:${managedclustername}
+subjects:
+- kind: ServiceAccount
+  name: ${managedclustername}-bootstrap-sa
+  namespace: ${managedclustername}
+EOF
+
+        cat << EOF | oc  apply -f -
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: open-cluster-management:managedcluster:${managedclustername}
+rules:
+- apiGroups:
+  - certificates.k8s.io
+  resources:
+  - certificatesigningrequests
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - register.open-cluster-management.io
+  resources:
+  - managedclusters/clientcertificates
+  verbs:
+  - renew
+- apiGroups:
+  - cluster.open-cluster-management.io
+  resourceNames:
+  - ${managedclustername}
+  resources:
+  - managedclusters
+  verbs:
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
+  - cluster.open-cluster-management.io
+  resourceNames:
+  - ${managedclustername}
+  resources:
+  - managedclusters/status
+  verbs:
+  - patch
+  - update
+EOF
+
+	cat << EOF | oc  apply -f -
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: open-cluster-management:managedcluster:${managedclustername}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: open-cluster-management:managedcluster:${managedclustername}
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: Group
+  name: system:open-cluster-management:${managedclustername}
+EOF
+
+    done
+
+}
+
+# accepts_managed_clusters iterates over all the managed clusters and accept the certificate
+accepts_managed_clusters() {
+    for managedclustername in $(oc get ns -lcluster.open-cluster-management.io/managedCluster -o jsonpath='{.items[*].metadata.name}');
+    do oc patch managedcluster ${managedclustername} -p='{"spec":{"hubAcceptsClient":true}}' --type=merge;
+       if [ $? -eq 0 ]
+       then
+           echo_green "Managed cluster ${managedclustername} accepted"
+       fi
+        
+    done
+}
+
+
+backups_available() {
+    rv="1"
+    howmanybackups=0
+    for bck in $(oc get backups -n velero --sort-by=.status.startTimestamp  -o jsonpath='{.items[?(@.status.phase=="Completed")].metadata.name}');
+    do
+	let howmanybackups+=1
+    done
+    if  [ $howmanybackups -ne 0 ]
+    then
+	rv="0"	
+    fi
+    echo ${rv}    
+}

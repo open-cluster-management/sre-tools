@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-set -x
-
 #https://github.com/vmware-tanzu/velero-plugin-for-aws
 #https://github.com/vmware-tanzu/velero-plugin-for-aws#option-1-set-permissions-with-an-iam-user
 
@@ -76,7 +74,7 @@ echo_green "Velero region $REGION"
 # Check whether mch exist
 oc get mch -A
 if [[ $? != "0" ]]; then 
-    echo_red "Install ACM before restoring managed clusters and configurations."
+    echo_red "Cannot find ACM. Cannot continue"
     exit 1
 fi
 
@@ -101,7 +99,11 @@ fi
 
 
 # Here velero should be up and running
-wait_until "deployment_up_and_running velero velero" 1 30
+wait_until "deployment_up_and_running velero velero" 10 300
+
+
+wait_until "backups_available velero" 5 60
+
 
 if [ -z "${BACKUPNAME}" ];
 then #Get most recent backup.
@@ -115,35 +117,23 @@ echo_green "Backup selected ${BACKUPNAME}"
 
 
 
-RESTORENAME=acm-restore-$(date +"%Y-%m-%d%H-%M-%S")
+RESTORENAME=acm-restore-$(date -u +"%Y-%m-%d-%H%M%S")
+echo_yellow "Restoring...${BACKUPANME} through ${RESTORENAME}"
 cat ${ROOTDIR}/backup-n-restore/artifacts/templates/restore.yaml.tpl | \
     sed "s/VELERO_RESTORE_NAME/${RESTORENAME}/" | \
     sed "s/VELERO_NAMESPACE/velero/" | \
     sed "s/VELERO_BACKUP_NAME/${BACKUPNAME}/" | \
     oc apply -f - > /dev/null 2>&1
 
-echo_green "Restore Created: $RESTORENAME" 
-wait_until "restore_finished velero ${RESTORENAME}" 5 300
+wait_until "restore_finished velero ${RESTORENAME}" 10 600
 
-newhubkubeconfig=$(mktemp)
-oc config view --flatten > ${newhubkubeconfig}
-for n in $(oc get ns -lcluster.open-cluster-management.io/managedCluster -o jsonpath='{.items[*].metadata.name}');
-do managed_kubeconfig_secret=$(oc get secret -o name -n $n | grep admin-kubeconfig);
-   if [ -z "${managed_kubeconfig_secret}" ]; then #this will skip local-cluster as well
-      continue
-   fi
 
-   managedclusterkubeconfig=$(mktemp)
-   oc get $managed_kubeconfig_secret -n $n  -o jsonpath={.data.kubeconfig} | base64 -d > $managedclusterkubeconfig
+#It iterates on managed cluster namespaces via label selector
+register_managed_clusters
 
-   #Deleting the bootstrap-hu-kubeconfig
-   oc --kubeconfig=$managedclusterkubeconfig delete secret bootstrap-hub-kubeconfig -n open-cluster-management-agent --wait=true
 
-   #Recreating boostrap-hub-kubeconfig
-   oc --kubeconfig=$managedclusterkubeconfig create secret generic bootstrap-hub-kubeconfig --from-file=kubeconfig="${newhubkubeconfig}" -n open-cluster-management-agent
+#It iterates on managed cluster namespaces via lable selector
+accepts_managed_clusters
 
-done
-
-rm -rf ${newhubkubeconfig}
 
 
