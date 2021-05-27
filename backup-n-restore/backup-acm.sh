@@ -6,8 +6,8 @@ source ${ROOTDIR}/backup-n-restore/hack/common.sh
 
 BUCKET=${DEFAULT_BUCKET}
 REGION=${DEFAULT_S3REGION}
-dateformat="%Y-%m-%dT%H:%M:%SZ"
 
+dateformat="%Y-%m-%d-%H%M%S"
 ################################################################################
 # Help: displays usage
 ################################################################################
@@ -21,7 +21,7 @@ Help()
  echo "-b <bucket name> Specify the bucket name. Default: ${BUCKET}"
  echo "-c <credential file path> Credential file path. No default."
  echo "-h Print this help."
- echo "-n <backup name> Specify the name of the backup, No default. If you don't specify a name the backup name will be acm-backup-${USER}-<date ${dateformat}>"
+ echo "-n <backup name> Specify the name of the backup, No default. If you don't specify a name the backup name will be acm-backup-${USER}-<date -u ${dateformat}>"
  echo "-r <region name> Specify the region name ${REGION}"
  echo
 }
@@ -60,27 +60,40 @@ if [[ $? != "0" ]]; then
 fi
 
 
-#Optional namespaces
-others=open-cluster-management-agent,open-cluster-management-agent-addon
-backupnamespaces=""
+# Check whether mch exist
+oc get mch -A
+if [[ $? != "0" ]]; then 
+    echo_red "Cannot find ACM. Cannot continue"
+    exit 1
+fi
 
-#To create a comma separeted list of existant namespaces. To avoid PartiallyFailed backups
-IFS=',' read -ra NS <<< "$others"
-for ns in ${NS[@]};
-do oc get ns $ns;
-   if [ $? -eq 0 ];
+
+
+backupnamesapces=open-cluster-management-agent,open-cluster-management-agent-addon,hive,openshift-operator-lifecycle-manager
+#Add managedclusters
+howmanymanaged=0
+for namespace in $(oc get managedclusters -o jsonpath='{.items[*].metadata.name}');
+do
+    if [ $namespace  == "local-cluster" ];
    then
-      if [[ $backupnamespaces == "" ]];
-      then
-        backupnamespaces=$ns
-      else
-        backupnamespaces=${backupnamespaces},$ns;
-      fi
-   fi
+       continue
+    fi
+    let howmanymanaged+=1
+    backupnamespaces=${backupnamespaces},${namespace};
 done
 
-#Now in all namespaces we're going to backup we exclude the helm installed resources (to avoid double instances)
-#TODO: check if label velero.io/exclude-from-backup=true already exist and eventually don't reset
+####################################################################
+# Stop in case there's no managed clusters  (skiping local-cluster)
+####################################################################
+if [ $howmanymanaged -eq 0 ]
+then
+    echo_red "Couldn't find managed cluster... Cannot continue"
+    exit
+fi
+
+# Add labels velero/exclude-from-backup 
+# TODO: check if label velero.io/exclude-from-backup=true already exist and eventually don't reset.
+#       If the TDDO is implemented no multiple script can run at the same time
 IFS=',' read -ra NS <<< "$backupnamespaces"
 for ns in ${NS[@]};
 do oc get ns $ns;
@@ -94,12 +107,6 @@ do oc get ns $ns;
 done
 
 
-#Attach managed clusters... (TODO: check whether related namespace exist)
-for namespace in $(oc get managedclusters -o jsonpath='{.items[*].metadata.name}');
-do  backupnamespaces=${backupnamespaces},${namespace};
-done
-
-
 if [[ $(namespace_active velero) != 0 ]]; then
     echo_yellow "Need to deploy velero"
     deploy_velero  $BUCKET $REGION $CREDENTIALFILEPATH
@@ -109,7 +116,7 @@ fi
 
 
 if [ -z "${BACKUPNAME}" ]; then
-    BACKUPNAME=acm-backup-${USER}-$(date +"${dateformat}")     
+    BACKUPNAME=acm-backup-${USER}-$(date -u +"${dateformat}")     
 fi
 
    
@@ -118,7 +125,13 @@ velero backup create "${BACKUPNAME}" \
        --exclude-resources certificatesigningrequests \
        --include-namespaces ${backupnamespaces}
 
-wait_until "backup_finished velero ${BACKUPNAME}"
+if [ $? -ne 0 ]
+then
+    echo_red "Backup ${BACKUPNAME} couldn't start... Can't continue"
+    exit
+fi
+
+wait_until "backup_finished velero ${BACKUPNAME}" 10 600 
 
 
 #Now we should remove labels
