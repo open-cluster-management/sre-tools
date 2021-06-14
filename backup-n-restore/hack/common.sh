@@ -14,29 +14,6 @@ DEFAULT_S3REGION=us-east-1
 ################################################################################
 command -v oc >/dev/null 2>&1 || { echo >&2 "can't find oc.  Aborting."; exit 1; }
 
-#############################################################################################
-# Check for velero, if it doesn't exist attempt to install. Currently used sonly for backup.#
-# TODO: get rid of of need for velero binary
-#############################################################################################
-command -v velero >/dev/null 2>&1
-
-if [ $? -ne 0 ]; then
-  echo "Velero is not installed. Attepmpting install to ${VELERO_BIN_PATH}..."
-  curl -sL $VELERO_INSTALL_URL | tar --strip-components=1 -C $VELERO_BIN_PATH -xzvf - velero-v1.6.0-linux-amd64/velero
-fi
-
-# If velero was already installed, make sure it is the right version. Also validates the install above.
-veleroversion=$(velero version --client-only | awk '/Version/ {print $2}')
-if [[ ! "$veleroversion" =~ "v1.6.0" ]]; then
-    echo "It appears you've velero $veleroversion. The environment has been tested with velero v1.6.0."
-    exit 1
-fi
-
-#############
-# Check aws #
-#############
-command -v aws >/dev/null 2>&1 || { echo >&2 "can't find aws.  Aborting."; exit 1; }
-
 echo_red() {
   printf "\033[0;31m%s\033[0m" "$1"
 }
@@ -78,9 +55,7 @@ namespace_active() {
   if [ "$phase" == "Active" ]; then
       rv="0"
   fi
-
-  echo ${rv}
-  
+  echo ${rv}  
 }
 
 
@@ -90,7 +65,6 @@ deployment_up_and_running() {
     
     rv="1"
     zero=0
-    #TODO troubleshoot --ignore-not-found
     desiredReplicas=$(oc get deployment ${deployment} -n ${namespace} -ojsonpath="{.spec.replicas}" --ignore-not-found)
     readyReplicas=$(oc get deployment ${deployment} -n ${namespace} -ojsonpath="{.status.readyReplicas}" --ignore-not-found)
     if [ "${desiredReplicas}" == "${readyReplicas}" ] && [ "${desiredReplicas}" != "${zero}" ]; then
@@ -239,13 +213,18 @@ EOF
        oc --kubeconfig=$managedclusterkubeconfig delete secret  bootstrap-hub-kubeconfig -n open-cluster-management-agent
        
        oc --kubeconfig=$managedclusterkubeconfig create secret generic bootstrap-hub-kubeconfig --from-file=kubeconfig="${newbootstraphubkubeconfig}" -n open-cluster-management-agent
-
        rm -rf $managedclusterkubeconfig
        if [ $? -eq 0 ]
        then
            echo_green "tmp kubeconfig $managedclusterkubeconfig deleted"
        fi
        
+           
+       # Update syncset kubeconfig with newbootstraphubkubeconfig
+       oldboostraphubkconfig=$(oc get syncset ${managedclustername}-klusterlet -n ${managedclustername} -o jsonpath='{.spec.resources[*].data.kubeconfig}')
+       
+       encodedNewbootstraphubkubeconfig=$(cat $newbootstraphubkubeconfig | base64 -w0)
+       oc get syncset ${managedclustername}-klusterlet -n ${managedclustername} -o yaml | sed "s/${oldboostraphubkconfig}/${encodedNewbootstraphubkubeconfig}/" | oc replace -f -
        rm -rf $newbootstraphubkubeconfig
        if [ $? -eq 0 ]
        then
@@ -357,11 +336,21 @@ EOF
 # accepts_managed_clusters iterates over all the managed clusters and accept the certificate
 accepts_managed_clusters() {
     for managedclustername in $(oc get ns -lcluster.open-cluster-management.io/managedCluster -o jsonpath='{.items[*].metadata.name}');
-    do oc patch managedcluster ${managedclustername} -p='{"spec":{"hubAcceptsClient":true}}' --type=merge;
-       if [ $? -eq 0 ]
-       then
-           echo_green "Managed cluster ${managedclustername} accepted"
+    do previoushubhaccepted=$(oc get ns ${managedclustername} -o jsonpath='{.metadata.annotations.open-cluster-management\.io/srchubacceptsclient}');
+       #TODO: check previoushubhaccepted is defined
+       if  [ "${previoushubhaccepted}" == "true" ];
+	   then
+	       oc patch managedcluster ${managedclustername} -p='{"spec":{"hubAcceptsClient":true}}' --type=merge;
+	       if [ $? -eq 0 ]	 		
+	       then
+		   echo_green "Managed cluster ${managedclustername} accepted"
+	       else
+		   echo_red "Unable to accept managed cluster ${managedclustername}" 
+	       fi
+       else
+	   echo_red "Skipping managed cluster $managedclustername as it was not accepted"
        fi
+       
         
     done
 }
@@ -379,4 +368,72 @@ backups_available() {
 	rv="0"	
     fi
     echo ${rv}    
+}
+
+#kconfig_or_context inferrs whether the parameter is a Kubeconfi file or a context name. It returns the oc/kubectl parameter
+kconfig_or_kcontext() {
+    if [ $# -ne 1 ];
+    then
+	echo_red "One (and only one) parameter is admitted: either a kubeconfig file path oa string context name"
+	exit
+    fi
+    if [ -z "$1" ];
+    then
+	echo_red "Emtpy parameter given. Cannot continue."
+	exit
+    fi
+    kforctxt=${1}
+    if [ -f ${kforctxt} ];
+    then
+	echo "--kubeconfig=${kforctxt}"
+    else
+	echo "--context=${kforctxt}"
+    fi
+}
+
+
+deployment_scaled_to_zero() {
+    contextorkubeconfig=$1
+    namespace=$2
+    deployment=$3
+
+    rv="1"
+    desiredReplicas=$(oc $(kconfig_or_kcontext ${contextorkubeconfig}) get deployment ${deployment} -n ${namespace} -ojsonpath="{.spec.replicas}" --ignore-not-found)
+    availableReplicas=$(oc get $(kconfig_or_kcontext ${contextorkubeconfig}) deployment ${deployment} -n ${namespace} -ojsonpath="{.status.availebleReplicas}")
+    if [ "${desiredReplicas}" == "0" ] && [ -z "$availableReplicas" ];
+    then
+	rv="0"
+    fi
+    echo ${rv}
+}
+
+#detach_clusters detach the managedcluster from the previous HUB src
+detach_clusters() {
+    HUBSRC=${1}
+    if [ -z ${HUBSRC} ];
+    then
+	echo_red "Unable to connect to HUB... Missing kubeconfig or context" 
+	echo "1"
+	return
+    fi
+
+    for managedclustername in $(oc $(kconfig_or_kcontext ${HUBSRC}) get ns -lcluster.open-cluster-management.io/managedCluster -o jsonpath='{.items[*].metadata.name}');
+    do [ ${managedclustername} == "local-cluster" ] && continue;
+     
+       oc $(kconfig_or_kcontext ${HUBSRC}) patch clusterdeployment/${managedclustername} -n  ${managedclustername} --type=json --patch='[ { "op": "add", "path": "/spec/preserveOnDelete", "value":true}]'
+
+       oc $(kconfig_or_kcontext ${HUBSRC}) patch clusterdeployment/${managedclustername} -n  ${managedclustername} --type json --patch='[ { "op": "remove", "path": "/metadata/finalizers" } ]' 
+       oc $(kconfig_or_kcontext ${HUBSRC}) delete clusterdeployment/${managedclustername} -n ${managedclustername} --wait=true
+        oc $(kconfig_or_kcontext ${HUBSRC}) patch managedcluster/${managedclustername} -n  ${managedclustername} --type json   --patch='[ { "op": "remove", "path": "/metadata/finalizers" } ]' 
+       oc $(kconfig_or_kcontext ${HUBSRC}) delete managedcluster/${managedclustername} --wait=true    
+    done
+    # Now delete namespace
+    for managedclustername in $(oc $(kconfig_or_kcontext ${HUBSRC}) get ns -lcluster.open-cluster-management.io/managedCluster -o jsonpath='{.items[*].metadata.name}');
+    do [ ${managedclustername} == "local-cluster" ] && continue;
+       oc patch namespace/${managedclustername} --type json   --patch='[ { "op": "remove", "path": "/spec/finalizers" } ]' 
+       oc $(kconfig_or_kcontext ${HUBSRC} ) delete namespace ${managedclustername} --wait=true       
+    done
+    echo "0"
+    return
+
 }
