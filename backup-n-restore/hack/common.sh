@@ -9,6 +9,13 @@ DEFAULT_S3PROVIDER=aws
 DEFAULT_BUCKET=velero-backup-acm
 DEFAULT_S3REGION=us-east-1
 
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    BASE64_ENCODE=base64
+else
+    BASE64_ENCODE=base64 -w0
+fi
+
+
 ################################################################################
 # Check static prerequisites 
 ################################################################################
@@ -130,7 +137,7 @@ deploy_velero() {
 	sed "s/BUCKET/${bucketname}/" | \
 	sed "s/BACKUPSTORAGELOCATIONREGION/${region}/" | \
 	sed "s/VOLUMESNAPSHOTLOCATIONREGION/${region}/" | \
-	sed "s/S3CREDENTIALS/$(cat ${s3credentials} | base64 -w 0)/" | \
+	sed "s/S3CREDENTIALS/$(cat ${s3credentials} | ${BASE64_ENCODE} )/" | \
 	oc  apply -f -
 }
 
@@ -223,7 +230,7 @@ EOF
        # Update syncset kubeconfig with newbootstraphubkubeconfig
        oldboostraphubkconfig=$(oc get syncset ${managedclustername}-klusterlet -n ${managedclustername} -o jsonpath='{.spec.resources[*].data.kubeconfig}')
        
-       encodedNewbootstraphubkubeconfig=$(cat $newbootstraphubkubeconfig | base64 -w0)
+       encodedNewbootstraphubkubeconfig=$(cat $newbootstraphubkubeconfig | ${BASE64_ENCODE})
        oc get syncset ${managedclustername}-klusterlet -n ${managedclustername} -o yaml | sed "s/${oldboostraphubkconfig}/${encodedNewbootstraphubkubeconfig}/" | oc replace -f -
        rm -rf $newbootstraphubkubeconfig
        if [ $? -eq 0 ]
