@@ -101,7 +101,11 @@ fi
 backupmanifestfile=$(mktemp)
 cp ${ROOTDIR}/backup-n-restore/artifacts/templates/backup.yaml.tpl $backupmanifestfile
 echo_yellow "Created $backupmanifestfile as temporary manifest file for backup"
-echo -e "  includedNamespaces:" >> $backupmanifestfile
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "  includedNamespaces:" >> $backupmanifestfile
+else
+    echo -e "  includedNamespaces:" >> $backupmanifestfile
+fi
 # Add labels velero/exclude-from-backup 
 # TODO: check if label velero.io/exclude-from-backup=true already exist and eventually don't reset.
 #       If the TDDO is implemented no multiple script can run at the same time
@@ -114,7 +118,11 @@ do oc get ns $ns;
        do
 	   oc label $item velero.io/exclude-from-backup=true -n $ns
        done
-       echo -e "  - $ns" >> $backupmanifestfile
+       if [[ "$OSTYPE" == "darwin"* ]]; then
+           echo "  - $ns" >> $backupmanifestfile
+       else
+           echo -e "  - $ns" >> $backupmanifestfile
+       fi
    fi
 done
 
