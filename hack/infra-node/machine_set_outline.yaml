@@ -1,0 +1,62 @@
+apiVersion: machine.openshift.io/v1beta1
+kind: MachineSet
+metadata:
+  labels:
+    machine.openshift.io/cluster-api-cluster: <infrastructure_set> 
+  name: <infrastructure_set>-infra-<zone>
+  namespace: openshift-machine-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      machine.openshift.io/cluster-api-cluster: <infrastructure_set> 
+      machine.openshift.io/cluster-api-machineset: <infrastructure_set>-infra-<zone> 
+  template:
+    metadata:
+      labels:
+        machine.openshift.io/cluster-api-cluster: <infrastructure_set> 
+        machine.openshift.io/cluster-api-machine-role: infra
+        machine.openshift.io/cluster-api-machine-type: infra 
+        machine.openshift.io/cluster-api-machineset: <infrastructure_set>-infra-<zone> 
+    spec:
+      metadata:
+        labels:
+          node-role.kubernetes.io/infra: "<infrastructure_node>"
+      taints: 
+        - key: node-role.kubernetes.io/infra
+          effect: NoSchedule
+      providerSpec:
+        value:
+          ami:
+            id: <infrastructure_ami>
+          apiVersion: awsproviderconfig.openshift.io/v1beta1
+          blockDevices:
+            - ebs:
+                iops: 0
+                volumeSize: 120
+                volumeType: gp2
+          credentialsSecret:
+            name: aws-cloud-credentials
+          deviceIndex: 0
+          iamInstanceProfile:
+            id: <infrastructure_set>-worker-profile 
+          instanceType: <instance_type>
+          kind: AWSMachineProviderConfig
+          placement:
+            availabilityZone: <zone>
+            region: <infrastructure_region>
+          securityGroups:
+            - filters:
+                - name: tag:Name
+                  values:
+                    - <infrastructure_set>-worker-sg 
+          subnet:
+            filters:
+              - name: tag:Name
+                values:
+                  - <infrastructure_set>-private-<zone> 
+          tags:
+            - name: kubernetes.io/cluster/<infrastructure_set> 
+              value: owned
+          userDataSecret:
+            name: worker-user-data
