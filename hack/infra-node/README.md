@@ -3,7 +3,7 @@
 The info below is provided to assist in the setup of OpenShift so that
 infra nodes will be used for ACM when it is installed.
 
-This tooling currently only supports OpenShift running in AWS.
+The instructions and tooling currently only support OpenShift running in AWS.
 
 ## Deploy OpenShift
 
@@ -18,7 +18,7 @@ Add 3 infra nodes using the `infra_node_runner.sh` script.
 ```
 
 ## Move OpenShift workload to infra nodes
-Move OpenShift pod workload to infra nodes using the `move-to-infra.sh` script.
+Move OpenShift pod workload to infra nodes using the `move-to-infra.sh` script.  This is based on https://docs.openshift.com/container-platform/4.8/machine_management/creating-infrastructure-machinesets.html#moving-resources-to-infrastructure-machinesets
 
 ```shell
 ./move-to-infra.sh cahl-infra myname-infra
@@ -46,9 +46,16 @@ kubectl cordon  <node name>
 
 A modification will need to be done to TBD in order to ACM to install on the infra nodes
 
-TBD
+TBD.  Still need more investigation to get this to work with https://github.com/open-cluster-management/deploy/blob/master/start.sh and not have pods hanging in Pending state
+because no vanilla worker nodes are available.  
+
+TODO
 
 Ensure there are no pods in pending state.
 ```shell
 oc get pods -A | grep Pending
 ```
+
+## Make sure everything works!
+
+Run your tests.
