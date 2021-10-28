@@ -18,12 +18,24 @@
 #
 # Blame: @joeg-pro
 
+if [ -z "$1" ] ; then
+echo "To use: ./move-to-infra.sh INFRASTRUCTURE_NODE"
+printf "\n"
+echo 'INFRASTRUCTURE_NODE = Name you wish to make the infrastructure node label'
+printf "\n"
+exit 1
+fi
+
+# Get infrastructure_node
+INFRASTRUCTURE_NODE=$1
+
+
 tmp_file="./tmp.file"
 
 # Common fragments:
 
 nodeselector=$(cat <<EOF | yq -c .
-node-role.kubernetes.io/infra: ""
+node-role.kubernetes.io/infra: "${INFRASTRUCTURE_NODE}"
 EOF
 )
 
@@ -64,7 +76,7 @@ oc -n openshift-ingress-operator patch IngressController default  --type="json" 
 # top level keys under spec.  We assume neither exists already.
 
 nodeselector=$(cat <<EOF | yq -c .
-node-role.kubernetes.io/infra: ""
+node-role.kubernetes.io/infra: "${INFRASTRUCTURE_NODE}"
 EOF
 )
 
@@ -107,63 +119,63 @@ data:
   config.yaml: |+
     alertmanagerMain:
       nodeSelector:
-        node-role.kubernetes.io/infra: ""
+        node-role.kubernetes.io/infra: "${INFRASTRUCTURE_NODE}"
       tolerations:
       - key: node-role.kubernetes.io/infra
         effect: NoSchedule
         operator: Exists
     prometheusK8s:
       nodeSelector:
-        node-role.kubernetes.io/infra: ""
+        node-role.kubernetes.io/infra: "${INFRASTRUCTURE_NODE}"
       tolerations:
       - key: node-role.kubernetes.io/infra
         effect: NoSchedule
         operator: Exists
     prometheusOperator:
       nodeSelector:
-        node-role.kubernetes.io/infra: ""
+        node-role.kubernetes.io/infra: "${INFRASTRUCTURE_NODE}"
       tolerations:
       - key: node-role.kubernetes.io/infra
         effect: NoSchedule
         operator: Exists
     grafana:
       nodeSelector:
-        node-role.kubernetes.io/infra: ""
+        node-role.kubernetes.io/infra: "${INFRASTRUCTURE_NODE}"
       tolerations:
       - key: node-role.kubernetes.io/infra
         effect: NoSchedule
         operator: Exists
     k8sPrometheusAdapter:
       nodeSelector:
-        node-role.kubernetes.io/infra: ""
+        node-role.kubernetes.io/infra: "${INFRASTRUCTURE_NODE}"
       tolerations:
       - key: node-role.kubernetes.io/infra
         effect: NoSchedule
         operator: Exists
     kubeStateMetrics:
       nodeSelector:
-        node-role.kubernetes.io/infra: ""
+        node-role.kubernetes.io/infra: "${INFRASTRUCTURE_NODE}"
       tolerations:
       - key: node-role.kubernetes.io/infra
         effect: NoSchedule
         operator: Exists
     telemeterClient:
       nodeSelector:
-        node-role.kubernetes.io/infra: ""
+        node-role.kubernetes.io/infra: "${INFRASTRUCTURE_NODE}"
       tolerations:
       - key: node-role.kubernetes.io/infra
         effect: NoSchedule
         operator: Exists
     openshiftStateMetrics:
       nodeSelector:
-        node-role.kubernetes.io/infra: ""
+        node-role.kubernetes.io/infra: "${INFRASTRUCTURE_NODE}"
       tolerations:
       - key: node-role.kubernetes.io/infra
         effect: NoSchedule
         operator: Exists
     thanosQuerier:
       nodeSelector:
-        node-role.kubernetes.io/infra: ""
+        node-role.kubernetes.io/infra: "${INFRASTRUCTURE_NODE}"
       tolerations:
       - key: node-role.kubernetes.io/infra
         effect: NoSchedule
