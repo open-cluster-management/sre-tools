@@ -1,0 +1,44 @@
+---
+
+- hosts: localhost
+  connection: local
+  become: false
+  tasks:
+  - name: starting work
+    shell: |
+      echo "hello world!"
+  - name: clone acme.sh
+    shell: |
+      if [ -d ./acme.sh ]; then
+        rm -rf ./acme.sh
+      fi
+      git clone https://github.com/acmesh-official/acme.sh.git
+
+      export AWS_ACCESS_KEY=${AWS_ACCESS_KEY_ID}
+      export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      export API=$(oc whoami --show-server | cut -f 2 -d ':' | cut -f 3 -d '/' | sed 's/-api././')
+      export WILDCARD=$(oc get ingresscontroller default -n openshift-ingress-operator -o jsonpath='{.status.domain}')
+
+      echo $API
+      echo $WILDCARD
+      
+      cd acme.sh
+      
+      # ./acme.sh --register-account -m {your email address}
+      ./acme.sh  --issue   --dns dns_aws -d ${API} -d "*.${WILDCARD}"
+
+      pushd ${PWD}
+      cd ${HOME}/.acme.sh/${API}
+      oc create secret tls router-certs --cert=fullchain.cer --key=${API}.key -n openshift-ingress
+      oc patch ingresscontroller default -n openshift-ingress-operator --type=merge --patch='{"spec": { "defaultCertificate": { "name": "router-certs" } } }'
+      popd
+    register: output
+  - name: debug
+    debug:
+      msg: "{{ output.stdout_lines }}"
+
+  - name: Remove acme.sh folder
+    shell: |
+      if [ -d acme.sh ]; then
+        rm -rf ./acme.sh
+      fi

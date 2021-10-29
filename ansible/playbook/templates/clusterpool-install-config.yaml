@@ -1,0 +1,52 @@
+apiVersion: v1
+metadata:
+  name: '{{ pool_name_prefix }}-{{ pool_name }}'
+baseDomain: {{ base_domain }}
+fips: true
+imageContentSources:
+  - mirrors:
+    - quay.io:443/acm-d
+    source: registry.redhat.io/rhacm2
+  - mirrors:
+    - quay.io:443/acm-d
+    source: registry.redhat.io/multicluster-engine
+  - mirrors:
+    - registry.redhat.io/openshift4/ose-oauth-proxy
+    source: registry.access.redhat.com/openshift4/ose-oauth-proxy
+controlPlane:
+  hyperthreading: Enabled
+  name: master
+  replicas: 1
+  platform:
+    aws:
+      rootVolume:
+        iops: 4000
+        size: 100
+        type: io1
+      type: {{ master_size }}
+compute:
+- hyperthreading: Enabled
+  name: 'worker'
+  replicas: 0
+  platform:
+    aws:
+      rootVolume:
+        iops: 2000
+        size: 100
+        type: io1
+      type: m5.xlarge
+networking:
+  networkType: OpenShiftSDN
+  clusterNetwork:
+  - cidr: 10.128.0.0/14
+    hostPrefix: 23
+  machineNetwork:
+  - cidr: 10.0.0.0/16
+  serviceNetwork:
+  - 172.30.0.0/16
+platform:
+  aws:
+    region: {{ region }}
+pullSecret: "" # skip, hive will inject based on it's secrets
+sshKey: |-
+  {{ ssh_public_key }}
