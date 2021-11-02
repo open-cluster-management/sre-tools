@@ -1,0 +1,74 @@
+---
+- hosts: localhost
+  connection: local
+  become: false
+  vars:
+    RHACM_PULL_SECRET_YAML_FILE: "~/rhacm-pull-secret.yaml"
+    home: "{{ lookup('env', 'HOME') | default('', True) }}"
+    optional_vars_file: "{{ home }}/external_vars.yml"
+  tasks:
+  - include_vars: "{{ optional_vars_file }}"
+    when: optional_vars_file is file
+
+  - name: Apply operator manifests
+    shell: |
+      if [ -d rhacm-kustomization ]; then
+        rm -rf rhacm-kustomization
+      fi
+      git clone https://github.com/cdoan1/rhacm-kustomization.git
+      cd rhacm-kustomization
+      oc apply -k rhacm-operator/base-ds
+      cd ..
+    register: output
+
+  - name: 'oc apply -k rhacm-operator/base-ds'
+    debug:
+      msg: 
+      - "{{ output.stdout_lines }}"
+
+  - name: Get current pod count in open-cluster-management namespace
+    command: oc get pods -n open-cluster-management -o name
+    register: pod_count_raw
+
+  - name: Wait for all pods to be 'Running'
+    command: oc get pods -n open-cluster-management
+    register: cmd_res
+    retries: 20
+    until: cmd_res.stdout_lines | reject('search','Running') | reject('search', 'Completed') | reject('search', 'NAME') | list | count == 0
+    when: pod_count_raw.stdout_lines | list | count < 14 and ( pod_count_raw.stdout_lines | list | count > 11 )
+
+  - name: 'oc get pods -n open-cluster-management'
+    debug:
+      msg: 
+      - "{{ cmd_res.stdout_lines }}"
+      - "{{ cmd_res.stdout_lines | reject('search','Running') | reject('search', 'Completed') | reject('search', 'NAME') | list | count }}"
+    when: pod_count_raw.stdout_lines | list | count < 14
+
+  - name: Apply pull secret and operator instance manifests
+    shell: |
+      cd rhacm-kustomization
+      if [ ! -f {{ RHACM_PULL_SECRET_YAML_FILE }} ]; then
+        exit 1
+      fi
+      oc apply -f {{ RHACM_PULL_SECRET_YAML_FILE }}
+      oc apply -k rhacm-instance/overlays/basic-ds
+    register: rhacm_instance_output
+
+  - name: 'oc apply -k rhacm-instance/overlays/basic-ds'
+    debug:
+      msg:
+      - "{{ rhacm_instance_output.stdout_lines }}"
+      - "wait for oc get mch multiclusterhub -n open-cluster-management -o yaml status to go from `Progressing` -> `Running`"
+
+  - name: Wait for all multiclusterhub status phase to transition from 'Installing' -> 'Running'
+    command: oc get mch multiclusterhub -ojsonpath='{.status.phase}' -n open-cluster-management
+    register: cmd_res
+    retries: 60
+    until: cmd_res.stdout_lines | reject('search','Running') | list | count == 0
+    ignore_errors: yes
+
+  - name: Remove rhacm-kustomaization folder
+    shell: |
+      if [ -d rhacm-kustomization ]; then
+        rm -rf ./rhacm-kustomization
+      fi

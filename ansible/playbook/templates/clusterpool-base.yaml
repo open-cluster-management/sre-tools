@@ -1,0 +1,56 @@
+---
+apiVersion: hive.openshift.io/v1
+kind: ClusterPool
+metadata:
+  name: {{ pool_name_prefix }}-{{ pool_name }}
+  namespace: {{ pool_name_prefix }}-{{ pool_name }}
+  labels:
+    cloud: AWS
+    region: {{ region }}
+    vendor: OpenShift
+spec:
+  size: {{ clusterpool_size }}
+  baseDomain: {{ base_domain }}
+  skipMachinePools: true
+  installConfigSecretTemplateRef:
+    name: {{ pool_name_prefix }}-{{ pool_name }}-install-config
+  imageSetRef:
+    name: {{ cluster_image_set }}
+  pullSecretRef:
+    name: {{ pool_name_prefix }}-{{ pool_name }}-pull-secret
+  platform:
+    aws:
+      credentialsSecretRef:
+        name: {{ pool_name_prefix }}-{{ pool_name }}-aws-creds
+      region: {{ region }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ pool_name_prefix }}-{{ pool_name }}-pull-secret
+  namespace: {{ pool_name_prefix }}-{{ pool_name }}
+type: kubernetes.io/dockerconfigjson
+data:
+  .dockerconfigjson: |-
+    {{ pull_secret_json_encoded }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ pool_name_prefix }}-{{ pool_name }}-install-config
+  namespace: {{ pool_name_prefix }}-{{ pool_name }}
+type: Opaque
+data:
+  install-config.yaml: >-
+    {{ lookup('file', '/tmp/{{ pool_name_prefix }}-{{ pool_name }}-clusterpool-install-config.yaml') | b64encode }}
+---
+apiVersion: v1
+kind: Secret
+type: Opaque
+metadata:
+  name: {{ pool_name_prefix }}-{{ pool_name }}-aws-creds
+  namespace: {{ pool_name_prefix }}-{{ pool_name }}
+stringData:
+  aws_access_key_id: {{ aws_access_key_id }}
+  aws_secret_access_key: {{ aws_secret_access_key }}
+

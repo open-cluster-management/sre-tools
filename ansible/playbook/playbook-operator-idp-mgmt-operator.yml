@@ -1,0 +1,50 @@
+---
+
+- hosts: localhost
+  connection: local
+  become: false
+  vars:
+    RHACM_PULL_SECRET_YAML_FILE: "~/rhacm-pull-secret.yaml"
+    home: "{{ lookup('env', 'HOME') | default('', True) }}"
+    # optional_vars_file: "{{ playbook_dir }}/../vars/external_vars.yml"
+    optional_vars_file: "{{ home }}/external_vars.yml"
+  tasks:
+  - include_vars: "{{ optional_vars_file }}"
+    when: optional_vars_file is file
+
+  # TODO(cdoan): verify kustomize version
+
+  - name: Apply operator manifests
+    shell: |
+      if [ -d idp-mgmt-operator ]; then
+        rm -rf idp-mgmt-operator
+      fi
+      git clone https://github.com/identitatem/idp-mgmt-operator.git
+      cd idp-mgmt-operator
+      make deploy
+      cd ..
+    register: output
+
+  - name: 'make deploy'
+    debug:
+      msg: 
+      - "{{ output.stdout_lines }}"
+
+  - name: Generate authrealm
+    shell: |
+      export GITHUB_APP_CLIENT_ID={{ GITHUB_APP_CLIENT_ID }}
+      export GITHUB_APP_CLIENT_SECRET={{ GITHUB_APP_CLIENT_SECRET }}
+      export GITHUB_APP_CLIENT_ORG={{ GITHUB_APP_CLIENT_ORG }}
+      export IDP_NAME=sample-idp
+      export NAME=authrealm-sample
+      export NS=authrealm-sample-ns
+      cd idp-mgmt-operator/hack
+      env | grep GITHUB
+      ./generate-cr.sh
+      cat /tmp/authrealm-sample.yaml
+    register: output
+
+  - name: Authrealm manifest
+    debug:
+      msg: 
+      - "{{ output.stdout_lines }}"

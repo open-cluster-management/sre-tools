@@ -1,0 +1,35 @@
+---
+# Use this variable file as a reference for what variables you want to define.
+# copy this file into your ~/extneral_vars.yml so that the playbook can reference it
+
+organization_groups:
+- SRE
+
+# Used for ClusterPool playbook
+pool_name_prefix: pool
+pool_name: sno4x16x49x
+region: us-east-2
+clusterpool_size: 1
+master_size: m5.xlarge
+cluster_image_set: img4.9.4-x86-64-appsub
+
+base_domain: demo.red-chesterfield.com
+pull_secret_json_plain_text: |
+  {"auths":{}}
+pull_secret_json_encoded: |
+  ewogICJhdXRocyI...
+install_config_yaml_encoded: |
+  YXBpVmVyc2lvbjo...
+ssh_public_key: |
+  ssh-rsa AAAAB3NzaC1y...
+
+# End ClusterPool
+
+# Used for acme.sh certificate generation
+aws_access_key_id: "{{ lookup('env', 'AWS_ACCESS_KEY_ID') | default('', True) }}"
+aws_secret_access_key: "{{ lookup('env', 'AWS_SECRET_ACCESS_KEY') | default('', True) }}"
+
+# Used for idp-mgmt sample generation
+GITHUB_APP_CLIENT_ID: ede...
+GITHUB_APP_CLIENT_SECRET: d0c...
+GITHUB_APP_CLIENT_ORG: identitatem

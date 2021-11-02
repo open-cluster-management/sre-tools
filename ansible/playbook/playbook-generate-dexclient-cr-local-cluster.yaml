@@ -1,0 +1,27 @@
+---
+
+- hosts: localhost
+  connection: local
+  become: false
+  vars:
+    group_role: cluster-admin
+    GITHUB_ORGANIZATION: open-cluster-management
+    GITHUB_TOKEN: "{{ lookup('env', 'GITHUB_TOKEN') | default('', True) }}"
+    organization_groups:
+    - SRE
+    optional_vars_file: "{{ playbook_dir }}/../vars/external_vars.yml"
+  tasks:
+  - name: starting work
+    shell: |
+      echo "hello world!"
+
+  - include_vars: "{{ optional_vars_file }}"
+    when: optional_vars_file is file
+
+  - name: generate dexclient cr into /tmp
+    shell: |
+    register: output
+
+  - name: debug
+    debug:
+      msg: "{{ output.stdout_lines }}"

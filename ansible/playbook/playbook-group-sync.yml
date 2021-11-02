@@ -1,0 +1,90 @@
+---
+
+- hosts: localhost
+  connection: local
+  become: false
+  vars:
+    group_role: cluster-admin
+    GITHUB_ORGANIZATION: open-cluster-management
+    GITHUB_TOKEN: "{{ lookup('env', 'GITHUB_TOKEN') | default('', True) }}"
+    organization_groups:
+    - SRE
+    optional_vars_file: "{{ playbook_dir }}/../vars/external_vars.yml"
+  tasks:
+  - name: starting work
+    shell: |
+      echo "hello world!"
+
+  - include_vars: "{{ optional_vars_file }}"
+    when: optional_vars_file is file
+
+  - name: Setup group sync operator v0.0.6
+    shell: |
+      oc new-project group-sync-operator
+      if [ -d group-sync-operator ]; then
+        rm -rf group-sync-operator
+      fi
+      git clone -b v0.0.6 https://github.com/redhat-cop/group-sync-operator.git
+      cd group-sync-operator
+      oc apply -f deploy/crds/redhatcop.redhat.io_groupsyncs_crd.yaml
+      oc apply -n group-sync-operator -f deploy/service_account.yaml
+      oc apply -n group-sync-operator -f deploy/clusterrole.yaml
+      oc apply -n group-sync-operator -f deploy/clusterrole_binding.yaml
+      oc apply -n group-sync-operator -f deploy/role.yaml
+      oc apply -n group-sync-operator -f deploy/role_binding.yaml
+      oc apply -n group-sync-operator -f deploy/operator.yaml
+      cd ..
+      rm -rf group-sync-operator
+      oc create secret generic github-group-sync --from-literal=token={{ GITHUB_TOKEN }} -n group-sync-operator --dry-run -o yaml | kubectl apply -f -
+      cat <<EOF | kubectl apply -f -
+      apiVersion: redhatcop.redhat.io/v1alpha1
+      kind: GroupSync
+      metadata:
+        name: github-groupsync
+      spec:
+        providers:
+        - name: github
+          github:
+            organization: {{ GITHUB_ORGANIZATION }}
+            credentialsSecret:
+              name: github-group-sync
+              namespace: group-sync-operator
+      EOF
+    register: groupsyncoutput
+
+  - name: Wait for 20 seconds
+    wait_for:
+      delay: 20
+      timeout: 0
+    tags: wait20
+
+  - name: Verify group list
+    shell: |
+      for GROUP in $(kubectl get Group -l group-sync-operator.redhat-cop.io/sync-provider=github-groupsync_github -o jsonpath='{ .items[*].metadata.name }')
+      do
+        echo "- $GROUP"
+      done
+    register: verifygroups
+
+  - name: List known groups
+    debug:
+      msg: "{{ verifygroups.stdout_lines }}"
+
+  - name: Add rolebinding
+    shell: |
+      cat <<EOF | kubectl apply -f -
+      kind: ClusterRoleBinding
+      apiVersion: rbac.authorization.k8s.io/v1
+      metadata:
+        name: {{ item }}-cluster-admin
+      subjects:
+        - kind: Group
+          apiGroup: rbac.authorization.k8s.io
+          name: {{ item }}
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: {{ group_role }}
+      EOF
+    with_items: '{{ organization_groups }}'
+    register: oauthaddrolebinding
