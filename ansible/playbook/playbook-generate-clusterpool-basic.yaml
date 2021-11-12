@@ -1,0 +1,46 @@
+---
+
+- hosts: localhost
+  connection: local
+  become: false
+  vars:
+    group_role: cluster-admin
+    GITHUB_ORGANIZATION: open-cluster-management
+    GITHUB_TOKEN: "{{ lookup('env', 'GITHUB_TOKEN') | default('', True) }}"
+    home: "{{ lookup('env', 'HOME') | default('', True) }}"
+    organization_groups:
+    - SRE
+    optional_vars_file: "{{ home }}/external_vars.yml"
+  tasks:
+
+  - include_vars: "{{ optional_vars_file }}"
+    when: optional_vars_file is file
+
+  - name: Generate install-config.yaml manifest from template
+    template:
+      src: "{{ playbook_dir }}/templates/clusterpool-install-config.yaml"
+      dest: /tmp/{{ pool_name_prefix }}-{{ pool_name }}-clusterpool-install-config.yaml
+      mode: '0644'
+
+  - name: Visualize install-config.yaml
+    shell: |
+      cat /tmp/{{ pool_name_prefix }}-{{ pool_name }}-clusterpool-install-config.yaml
+    register: install_config
+
+  - name: Generate clusterpool manifest from template
+    template:
+      src: "{{ playbook_dir }}/templates/clusterpool-base.yaml"
+      dest: /tmp/{{ pool_name_prefix }}-{{ pool_name }}-clusterpool.yaml
+      mode: '0644'
+
+  - name: Apply clusterpool to cluster
+    shell: |
+      oc new-project {{ pool_name_prefix }}-{{ pool_name }}
+      oc apply -f /tmp/{{ pool_name_prefix }}-{{ pool_name }}-clusterpool.yaml
+    register: output
+
+  - name: Apply clusterpool to cluster
+    debug:
+      msg: 
+      - "{{ install_config.stdout_lines }}"
+      - "{{ output.stdout_lines }}"

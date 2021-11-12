@@ -16,13 +16,13 @@
       if [ -d rhacm-kustomization ]; then
         rm -rf rhacm-kustomization
       fi
-      git clone https://github.com/cdoan1/rhacm-kustomization.git
+      git clone https://github.com/cdoan1/rhacm-kustomization.git --branch release-2.4
       cd rhacm-kustomization
-      oc apply -k rhacm-operator/base-ds
+      oc apply -k rhacm-operator/base
       cd ..
     register: output
 
-  - name: 'oc apply -k rhacm-operator/base-ds'
+  - name: 'oc apply -k rhacm-operator/base'
     debug:
       msg: 
       - "{{ output.stdout_lines }}"
@@ -32,11 +32,11 @@
     register: pod_count_raw
 
   - name: Wait for all pods to be 'Running'
-    command: oc get pods -n open-cluster-management
+    command: oc get pods -n open-cluster-management --no-headers
     register: cmd_res
     retries: 20
-    until: cmd_res.stdout_lines | reject('search','Running') | reject('search', 'Completed') | reject('search', 'NAME') | list | count == 0
-    when: pod_count_raw.stdout_lines | list | count < 14 and ( pod_count_raw.stdout_lines | list | count > 11 )
+    until: cmd_res.stdout_lines | reject('search','Running') | reject('search', 'Completed') | list | count == 0
+    when: pod_count_raw.stdout_lines | list | count < 14 and ( pod_count_raw.stdout_lines | list | count > 10 )
 
   - name: 'oc get pods -n open-cluster-management'
     debug:
@@ -55,7 +55,7 @@
       oc apply -k rhacm-instance/overlays/basic-ds
     register: rhacm_instance_output
 
-  - name: 'oc apply -k rhacm-instance/overlays/basic-ds'
+  - name: 'oc apply -k rhacm-instance/overlays/ha'
     debug:
       msg:
       - "{{ rhacm_instance_output.stdout_lines }}"

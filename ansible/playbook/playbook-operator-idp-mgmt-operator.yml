@@ -5,14 +5,30 @@
   become: false
   vars:
     RHACM_PULL_SECRET_YAML_FILE: "~/rhacm-pull-secret.yaml"
+    IDP_MGMT_VERSION: "{{ lookup('env', 'IDP_MGMT_VERSION') | default('v0.1.0', True) }}"
     home: "{{ lookup('env', 'HOME') | default('', True) }}"
-    # optional_vars_file: "{{ playbook_dir }}/../vars/external_vars.yml"
     optional_vars_file: "{{ home }}/external_vars.yml"
+    kubeconfig_file: "{{ lookup('env', 'KUBECONFIG') | default('', True) }}"
+    kubectl_cmd: "oc --insecure-skip-tls-verify=true"
   tasks:
+
   - include_vars: "{{ optional_vars_file }}"
     when: optional_vars_file is file
 
-  # TODO(cdoan): verify kustomize version
+  - name: Deploy idp-mgmt operator
+    block:
+    - name: Generate idp-mgmt manifests
+      template:
+        src: "{{ playbook_dir }}/templates/idp-mgmt-manifests.yaml"
+        dest: /tmp/idp-mgmt-manifests.yaml
+        mode: '0644'
+    - name: Create catalogsource
+      environment:
+        KUBECONFIG: "{{ kubeconfig_file }}"
+      shell: |
+        {{ kubectl_cmd }} delete -f /tmp/idp-mgmt-manifests.yaml || true
+        sleep 10
+        {{ kubectl_cmd }} apply -f /tmp/idp-mgmt-manifests.yaml
 
   - name: Apply operator manifests
     shell: |
@@ -24,11 +40,13 @@
       make deploy
       cd ..
     register: output
+    when: false
 
   - name: 'make deploy'
     debug:
       msg: 
       - "{{ output.stdout_lines }}"
+    when: false
 
   - name: Generate authrealm
     shell: |
@@ -43,8 +61,10 @@
       ./generate-cr.sh
       cat /tmp/authrealm-sample.yaml
     register: output
+    when: false
 
   - name: Authrealm manifest
     debug:
       msg: 
       - "{{ output.stdout_lines }}"
+    when: false
