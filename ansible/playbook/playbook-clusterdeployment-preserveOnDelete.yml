@@ -16,9 +16,12 @@
   - include_vars: "{{ optional_vars_file }}"
     when: optional_vars_file is file
 
-  - name: task loop
-    include_tasks: task-clusterpool.yml
-    with_items:
-      - "{{ clusterpoollist }}"
+  - name: Patch the clusterdeployment with label purpose=pm-demo
+    shell: |
+      oc get cd -l purpose=pm-demo -A --no-headers | awk '{print $1}' | xargs -I % oc patch clusterdeployment/% -n % --type=json --patch='[ { "op": "add", "path": "/spec/preserveOnDelete", "value":true}]'
+    register: output
 
-  
+  - name: oc patch clusterdeployment -l purpose=pm-demo
+    debug:
+      msg: 
+      - "{{ output.stdout_lines }}"

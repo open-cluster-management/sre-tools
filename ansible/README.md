@@ -1,5 +1,10 @@
 # Ansible Playbooks
 
+Here we define the ansible playbooks to help manage and configure a hub cluster in a repeatable way.
+The playbooks should be able to run against any cluster, and behave idempotently.
+
+Later on, we can convert these individual playbooks into roles.
+
 ## Setup Ansible
 
 ## Usage

@@ -1,0 +1,45 @@
+---
+
+- name: debug
+  debug:
+    msg:
+    - pool_name {{ item.pool_name }}
+    - pool_prefix {{ item.pool_prefix }}
+
+- name: facts
+  set_fact:
+    pool_name: "{{ item.pool_name }}"
+    pool_prefix: "{{ item.pool_prefix }}"
+    region: "{{ item.region }}"
+    master_size: "{{ item.master_size }}"
+    cluster_image_set: "{{ item.cluster_image_set }}"
+    clusterpool_size: "{{ item.clusterpool_size }}"
+
+- name: Generate install-config.yaml manifest from template
+  template:
+    src: "{{ playbook_dir }}/templates/clusterpool-install-config.yaml"
+    dest: "/tmp/{{ pool_prefix }}-{{ pool_name }}-clusterpool-install-config.yaml"
+    mode: '0644'
+
+- name: Visualize install-config.yaml
+  shell: |
+    cat /tmp/{{ pool_prefix }}-{{ pool_name }}-clusterpool-install-config.yaml
+  register: install_config
+
+- name: Generate clusterpool manifest from template
+  template:
+    src: "{{ playbook_dir }}/templates/clusterpool-base.yaml"
+    dest: /tmp/{{ pool_prefix }}-{{ pool_name }}-clusterpool.yaml
+    mode: '0644'
+
+- name: Apply clusterpool to cluster
+  shell: |
+    oc new-project {{ item.pool_prefix }}-{{ item.pool_name }} || oc project {{ item.pool_prefix }}-{{ item.pool_name }}
+    oc apply -f /tmp/{{ item.pool_prefix }}-{{ item.pool_name }}-clusterpool.yaml
+  register: output
+
+- name: Apply clusterpool to cluster
+  debug:
+    msg: 
+    - "{{ install_config.stdout_lines }}"
+    - "{{ output.stdout_lines }}"
